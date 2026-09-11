@@ -93,6 +93,12 @@
   }
   .btn:hover{background:var(--dark)}
   .btn:focus-visible{outline:3px solid var(--tint);outline-offset:3px}
+  .debug{
+    width:100%;max-width:440px;background:#0B0C10;border:1px solid var(--input);border-radius:10px;
+    color:var(--txt2);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;line-height:1.5;
+    padding:14px;margin-top:20px;white-space:pre-wrap;word-break:break-word;text-align:left
+  }
+  .debug b{color:var(--tint)}
   .consent{font-size:11px;color:var(--txt3);line-height:1.5;margin:12px 0 0;text-align:center}
   .consent a{color:var(--txt2)}
   .btn.outline{background:var(--input);border:1px solid var(--primary);font-size:14px;padding:13px;margin-top:10px}
@@ -170,6 +176,8 @@
 <div class="legal">+18 Proibido para menores. Apostas envolvem riscos. Jogue de forma consciente.</div>
 <p class="fine" id="fine">Uma participação por CPF, válida para contas verificadas. Todos os participantes desta ação recebem o mesmo prêmio promocional. Operadora autorizada nos termos da Portaria SPA/MF.</p>
 
+<pre class="debug" id="debug" hidden></pre>
+
 <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-live="polite">
   <div class="modal">
     <p class="chapeu" id="chapeu">SEU PRÊMIO</p>
@@ -214,8 +222,8 @@ const CONFIG = {
 
   // Banco Supabase. Deixe url e anonKey em branco para desligar.
   supabase: {
-    url: "",                   // https://xxxxxxxxxxxx.supabase.co
-    anonKey: "",               // chave "anon public" do projeto
+    url: "https://wkweqhszjujvevnbhhzg.supabase.co",
+    anonKey: "sb_publishable_0QsDv6tagm5DUVbuf8IXBQ_HSGhI_Mg",
     tabela: "roleta_leads",
     dedupePorTelefone: false   // true só funciona com o índice único do arquivo .sql
   },
@@ -442,11 +450,29 @@ function enviar(evento, p){
   if(!sb.url && !CONFIG.webhook) console.log("[roleta] resultado:", dados);
 }
 
+const DEBUG = new URLSearchParams(location.search).has("debug");
+
+function log(txt){
+  console.log("[roleta]", txt);
+  if(!DEBUG) return;
+  const d = document.getElementById("debug");
+  d.hidden = false;
+  d.textContent += txt + "\n";
+}
+
 function salvarSupabase(dados){
   const sb = CONFIG.supabase;
   const base = sb.url.replace(/\/+$/, "");
   const dedupe = sb.dedupePorTelefone;
-  fetch(base + "/rest/v1/" + sb.tabela + (dedupe ? "?on_conflict=telefone" : ""), {
+  const url = base + "/rest/v1/" + encodeURIComponent(sb.tabela) + (dedupe ? "?on_conflict=telefone" : "");
+
+  if(location.protocol === "file:")
+    log("ATENÇÃO: a página está aberta como arquivo local (file://). Alguns navegadores bloqueiam o envio. Use um servidor ou publique no Render.");
+
+  log("POST " + url);
+  log("dados: " + JSON.stringify(dados));
+
+  fetch(url, {
     method: "POST",
     headers: {
       "apikey": sb.anonKey,
@@ -454,10 +480,17 @@ function salvarSupabase(dados){
       "Content-Type": "application/json",
       "Prefer": dedupe ? "return=minimal,resolution=ignore-duplicates" : "return=minimal"
     },
-    body: JSON.stringify(dados),
-    keepalive: true
-  }).then(r => { if(!r.ok) r.text().then(t => console.warn("[supabase]", r.status, t)); })
-    .catch(e => console.warn("[supabase] falha:", e));
+    body: JSON.stringify(dados)
+  })
+  .then(r => r.text().then(t => {
+    if(r.ok){ log("OK " + r.status + " — linha gravada."); return; }
+    log("ERRO " + r.status + " — " + t);
+    document.getElementById("status").textContent = "Falha ao salvar (" + r.status + "). Veja o console.";
+  }))
+  .catch(e => {
+    log("FALHA DE REDE/CORS — " + e.message);
+    document.getElementById("status").textContent = "Falha de conexão ao salvar. Veja o console.";
+  });
 }
 
 function enviarWebhook(dados){
